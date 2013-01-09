@@ -127,6 +127,10 @@ class Babel(Module):
                 #newstyle=True
             #)
 
+    def before_handler(self, handler):
+        """translate a string"""
+        handler._ = self.get_translations(handler).ugettext
+
     def get_render_context(self, handler):
         """pass in gettext and ungettext into the local namespace."""
         return dict(
@@ -176,14 +180,10 @@ class Babel(Module):
         object if used outside of the request or if a translation cannot be
         found.
         """
-        #translations = getattr(ctx, 'babel_translations', None)
         translations = getattr(handler, "babel_translations", None)
-        print 1
-        print translations
         if translations is None:
             dirname = pkg_resources.resource_filename(self.app.import_name, "translations")
             translations = support.Translations.load(dirname, [self.get_locale(handler)])
-            print self.get_locale(handler)
             handler.babel_translations = translations
         return translations
 
@@ -205,6 +205,10 @@ class Babel(Module):
                     locale = Locale.parse(rv)
             handler.babel_locale = locale
         return locale
+
+    def gettext(self, handler, s):
+        """translate the string ``s`` based on the handler"""
+        return self.get_translations(handler).ugettext(s)
 
 
 def get_timezone():
