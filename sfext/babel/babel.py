@@ -121,11 +121,9 @@ class Babel(Module):
                 scientificformat=format_scientific,
             )
             app.jinja_env.add_extension('jinja2.ext.i18n')
-            #app.jinja_env.install_gettext_callables(
-                #lambda x: self.get_translations().ugettext(x),
-                #lambda s, p, n: self.get_translations().ungettext(s, p, n),
-                #newstyle=True
-            #)
+
+        self.load_translations()
+
 
     def before_handler(self, handler):
         """translate a string"""
@@ -138,26 +136,57 @@ class Babel(Module):
                 ngettext = self.get_translations(handler).ungettext,
         )
 
-    def list_translations(self):
-        """Returns a list of all the locales translations exist for.  The
-        list returned will be filled with actual locale objects and not just
-        strings.
+    def load_translations(self):
+        """load all translations for all languages, modules and the app.
 
-        .. versionadded:: 0.6
+        In order to have everything properly cached we will load all
+        translations into memory. 
+        
+        We will also merge module based catalogs into one main catalog.  This
+        means that we first fill the catalog with the module catalog and will
+        then merge the app on top so you have the possibility to override
+        certain translations from modules.
+
         """
-        dirname = os.path.join(self.app.root_path, 'translations')
-        if not os.path.isdir(dirname):
-            return []
-        result = []
+
+        self.all_locales = set() # all locale objects we know about
+        self.catalogs = {} # mapping from locale object to merged translations
+
+        # go through the modules and try to load their catalogs
+        for module in self.app.modules:
+            dirname = pkg_resources.resource_filename(module.import_name, "translations")
+            if not os.path.exists(dirname):
+                continue 
+            for folder in os.listdir(dirname):
+                locale_dir = os.path.join(dirname, folder, 'LC_MESSAGES')
+                if not os.path.isdir(locale_dir):
+                    continue
+                if filter(lambda x: x.endswith('.mo'), os.listdir(locale_dir)):
+                    l = Locale.parse(folder)
+                    self.all_locales.add(str(l))
+                    trans = support.Translations.load(dirname, l)
+                    if l not in self.catalogs:
+                        self.catalogs[str(l)] = trans
+                    else:
+                        # we merge if it exists already
+                        self.catalogs[str(l)].merge(trans)
+
+        # now for the app
+        dirname = pkg_resources.resource_filename(self.app.import_name, "translations")
         for folder in os.listdir(dirname):
             locale_dir = os.path.join(dirname, folder, 'LC_MESSAGES')
             if not os.path.isdir(locale_dir):
                 continue
             if filter(lambda x: x.endswith('.mo'), os.listdir(locale_dir)):
-                result.append(Locale.parse(folder))
-        if not result:
-            result.append(Locale.parse(self._default_locale))
-        return result
+                l = Locale.parse(folder)
+                self.all_locales.add(str(l))
+                trans = support.Translations.load(dirname, l)
+                if l not in self.catalogs:
+                    self.catalogs[str(l)] = trans
+                else:
+                    # we merge if it exists already
+                    self.catalogs[str(l)].merge(trans)
+
 
     @property
     def default_locale(self):
@@ -180,6 +209,11 @@ class Babel(Module):
         object if used outside of the request or if a translation cannot be
         found.
         """
+
+        l = self.get_locale(handler)
+        print l
+        return self.catalogs.get(str(l), support.Translations.load())
+
         translations = getattr(handler, "babel_translations", None)
         if translations is None:
             dirname = pkg_resources.resource_filename(self.app.import_name, "translations")
