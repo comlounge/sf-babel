@@ -1,1 +1,1 @@
-from babel import Babel, babel_module
+from babel import *

@@ -12,6 +12,7 @@
 
 from __future__ import absolute_import
 import os
+import functools
 
 # this is a workaround for a snow leopard bug that babel does not
 # work around :)
@@ -21,10 +22,10 @@ if os.environ.get('LC_CTYPE', '').lower() == 'utf-8':
 
 from datetime import datetime
 from babel import dates, numbers, support, Locale
-from starflyer import Module, AttributeMapper                                                                                                                                            
+from werkzeug import ImmutableDict
+from starflyer import Module, AttributeMapper
 import pkg_resources
 
-from werkzeug import ImmutableDict
 
 try:
     from pytz.gae import pytz
@@ -34,26 +35,148 @@ else:
     timezone = pytz.timezone
     UTC = pytz.UTC
 
+__all__ = ["T", "Babel", "babel_module"]
+
+class T(object):
+    """marker string class for marking strings for later translation.
+
+    If you are defining a string in a context you don't know the language to
+    translate it to yet, you can simply mark this string to be translated later.
+    To do so, you wrap it into this class like this::
+
+        s = T(u"You are now logged in.")
+
+    This string will behave like any other string, e.g. can be printed, added to etc.
+
+    In order to translate it you simply pass it into the gettext method, e.g. inside a handler::
+
+        print self._(s)
+
+    Contains code from speaklater just that the function has been removed and instead it's just a marker
+    class.
+
+    In order to extract those strings from python you have to add this to the babel call like this::
+
+        $ pybabel extract -F babel.cfg -k T -o messages.pot .
+        
+    """
+
+    __slots__ = ('value')
+
+    def __init__(self, s):
+        self.value = s
+
+    def __contains__(self, key):
+        return key in self.value
+
+    def __nonzero__(self):
+        return bool(self.value)
+
+    def __dir__(self):
+        return dir(unicode)
+
+    def __iter__(self):
+        return iter(self.value)
+
+    def __len__(self):
+        return len(self.value)
+
+    def __str__(self):
+        return str(self.value)
+
+    def __unicode__(self):
+        return unicode(self.value)
+
+    def __add__(self, other):
+        return self._value + other
+
+    def __radd__(self, other):
+        return other + self.value
+
+    def __mod__(self, other):
+        return self.value % other
+
+    def __rmod__(self, other):
+        return other % self.value
+
+    def __mul__(self, other):
+        return self.value * other
+
+    def __rmul__(self, other):
+        return other * self.value
+
+    def __lt__(self, other):
+        return self.value < other
+
+    def __le__(self, other):
+        return self.value <= other
+
+    def __eq__(self, other):
+        return self.value == other
+
+    def __ne__(self, other):
+        return self.value != other
+
+    def __gt__(self, other):
+        return self.value > other
+
+    def __ge__(self, other):
+        return self.value >= other
+
+    def __getattr__(self, name):
+        if name == '__members__':
+            return self.__dir__()
+        return getattr(self._value, name)
+
+    def __getstate__(self):
+        return self.value
+
+    def __setstate__(self, tup):
+        self.value = tup[0]
+
+    def __getitem__(self, key):
+        return self.value[key]
+
+    def __copy__(self):
+        return self
+
+    def __repr__(self):
+        try:
+            return 'l' + repr(self.value)
+        except Exception:
+            return '<%s broken>' % self.__class__.__name__
+
+
 class Babel(Module):
     """i18n support for starflyer applications.
 
-    In order to set the locale on a request basis you should create a function ``get_local()`` inside your 
-    handler and to set the timezone a function ``get_timezone()`` accordingly. The former can look like follows::
+    In order to set the locale on a request basis you should create a function ``get_local()`` and pass that into
+    the configuration of this module like this::
 
-        def get_locale():
+        babel_module(
+            locale_selector_func = get_local,
+            timezone_selector_func = get_timezone
+        ),
+
+    Both functions take the handler as the only argument from which you then can inspect e.g. request or session.
+
+    It could look like follows::
+        
+
+        def get_locale(handler):
             # if a user is logged in, use the locale from the user settings
-            if self.user is not None: # like it would work with userbase
-                return user.locale
+            if handler.user is not None: # like it would work with userbase
+                return handler.locale
             # otherwise try to guess the language from the user accept
             # header the browser transmits.  We support de/fr/en in this
             # example.  The best match wins.
-            return self.request.accept_languages.best_match(['de', 'fr', 'en'])
+            return handler.request.accept_languages.best_match(['de', 'fr', 'en'])
 
     For timezones it might look like this::
 
-        def get_timezone():
-            if self.user is not None:
-                return self.user.timezone
+        def get_timezone(handler):
+            if handler.user is not None:
+                return handler.user.timezone
         
     """
 
@@ -105,7 +228,6 @@ class Babel(Module):
         #:      otherwise the default for that language is used.
         self.date_formats = self.config.date_formats
 
-
         app = self.app
 
         if self.config.configure_jinja:
@@ -124,6 +246,17 @@ class Babel(Module):
 
         self.load_translations()
 
+        # register functions
+        # if no function is given we return None which is then converted
+        # into the default locale/tz later in get_translations
+        if self.config.locale_selector_func is None:
+            self.select_locale = lambda handler: None
+        else:
+            self.select_locale = self.config.locale_selector_func
+        if self.config.timezone_selector_func is None:
+            self.select_timezone = lambda handler: None
+        else:
+            self.select_timezone = self.config.timezone_selector_func
 
     def before_handler(self, handler):
         """translate a string"""
@@ -132,8 +265,8 @@ class Babel(Module):
     def get_render_context(self, handler):
         """pass in gettext and ungettext into the local namespace."""
         return dict(
-                gettext = self.get_translations(handler).ugettext,
-                ngettext = self.get_translations(handler).ungettext,
+                gettext = functools.partial(gettext, self.get_translations(handler)),
+                ngettext = functools.partial(ngettext, self.get_translations(handler)),
         )
 
     def load_translations(self):
@@ -165,7 +298,7 @@ class Babel(Module):
                     l = Locale.parse(folder)
                     self.all_locales.add(str(l))
                     trans = support.Translations.load(dirname, l)
-                    if l not in self.catalogs:
+                    if str(l) not in self.catalogs:
                         self.catalogs[str(l)] = trans
                     else:
                         # we merge if it exists already
@@ -181,7 +314,7 @@ class Babel(Module):
                 l = Locale.parse(folder)
                 self.all_locales.add(str(l))
                 trans = support.Translations.load(dirname, l)
-                if l not in self.catalogs:
+                if str(l) not in self.catalogs:
                     self.catalogs[str(l)] = trans
                 else:
                     # we merge if it exists already
@@ -209,9 +342,7 @@ class Babel(Module):
         object if used outside of the request or if a translation cannot be
         found.
         """
-
         l = self.get_locale(handler)
-        print l
         return self.catalogs.get(str(l), support.Translations.load())
 
         translations = getattr(handler, "babel_translations", None)
@@ -229,21 +360,23 @@ class Babel(Module):
         """
         locale = getattr(handler, 'babel_locale', None)
         if locale is None:
-            if not hasattr(handler, "get_locale"):
+            rv = self.select_locale(handler)
+            if rv is None:
                 locale = self.default_locale
             else:
-                rv = handler.get_locale()
-                if rv is None:
-                    locale = self.default_locale
-                else:
-                    locale = Locale.parse(rv)
+                locale = Locale.parse(rv)
             handler.babel_locale = locale
         return locale
 
     def gettext(self, handler, s):
         """translate the string ``s`` based on the handler"""
-        return self.get_translations(handler).ugettext(s)
+        return self.get_translations(handler).ugettext(unicode(s))
 
+
+###
+### everything below is just a copy still from flask-babel. We need to adapt it to make it
+### non thread-local
+###
 
 def get_timezone():
     """Returns the timezone that should be used for this request as
@@ -470,23 +603,12 @@ def format_scientific(number, format=None):
     return numbers.format_scientific(number, format=format, locale=locale)
 
 
-def gettext(string, **variables):
-    """Translates a string with the current locale and passes in the
-    given keyword arguments as mapping to a string formatting string.
-
-    ::
-
-        gettext(u'Hello World!')
-        gettext(u'Hello %(name)s!', name='World')
-    """
-    t = get_translations()
-    if t is None:
-        return string % variables
-    return t.ugettext(string) % variables
-_ = gettext
+def gettext(translations, s):
+    """function for translating string ``s`` with catalog in ``translations``"""
+    return translations.ugettext(unicode(s))
 
 
-def ngettext(singular, plural, num, **variables):
+def ngettext(translations, singular, plural, num, **variables):
     """Translates a string with the current locale and passes in the
     given keyword arguments as mapping to a string formatting string.
     The `num` parameter is used to dispatch between singular and various
@@ -499,10 +621,7 @@ def ngettext(singular, plural, num, **variables):
         ngettext(u'%(num)d Apple', u'%(num)d Apples', num=len(apples))
     """
     variables.setdefault('num', num)
-    t = get_translations()
-    if t is None:
-        return (singular if num == 1 else plural) % variables
-    return t.ungettext(singular, plural, num) % variables
+    return translations.ungettext(singular, plural, num) % variables
 
 
 def pgettext(context, string, **variables):
