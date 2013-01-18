@@ -1,6 +1,6 @@
 
 from sfext.babel import T, Babel, babel_module
-from starflyer import Application, Handler
+from starflyer import Application, Handler, URL
 
 class App(Application):
 
@@ -12,6 +12,10 @@ TEST_STRING = T("foo")
 
 class TestHandler(Handler):
     """dummy handler""" 
+    def get_locale(self):
+        """return the locale"""
+        return self.request.args.get('lang', 'en')
+
 
 def test_lazy():
     app = App(__name__)

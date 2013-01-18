@@ -13,6 +13,7 @@
 from __future__ import absolute_import
 import os
 import functools
+import starflyer
 
 # this is a workaround for a snow leopard bug that babel does not
 # work around :)
@@ -259,8 +260,10 @@ class Babel(Module):
             self.select_timezone = self.config.timezone_selector_func
 
     def before_handler(self, handler):
-        """translate a string"""
+        """inject i18n methods into the active handler"""
         handler._ = self.get_translations(handler).ugettext
+        handler.get_template_lang = functools.partial(self.get_template, handler)
+        handler.render_lang = functools.partial(self.render_lang, handler)
 
     def get_render_context(self, handler):
         """pass in gettext and ungettext into the local namespace."""
@@ -371,6 +374,43 @@ class Babel(Module):
     def gettext(self, handler, s):
         """translate the string ``s`` based on the handler"""
         return self.get_translations(handler).ugettext(unicode(s))
+
+    def get_template(self, handler, tmplname):
+        """return a template based on the current or default locale. If you give it a template
+        name like ``emails/subscription.txt`` this method will first check ``emails/de/subscription.txt``
+        if the locale is ``de``and if this does not exist it will use the default locale, e.g. ``en``
+        and search for ``emails/en/subscription.txt``.
+
+        This method will use the application's jinja environment to lookup templates.
+
+        :param handler: the active handler which is used to retrieve the current locale
+        :param tmplname: The path to the template file in question.
+        :return: a jinja template object 
+
+        """
+        l = self.get_locale(handler)
+        d = self.default_locale
+        path, filename = os.path.split(tmplname)
+        lpath = os.path.join(path, str(l), filename)
+        dpath = os.path.join(path, str(d), filename)
+        return self.app.jinja_env.select_template([lpath, dpath], globals = handler.template_globals)
+        
+    def render_lang(self, handler, tmplname=None, **kwargs):
+        """renders a language dependant template. It will use ``get_template`` to find the
+        template in question and then call the render method like the normal ``render()``
+        method in the handler would do.
+        """
+        params = starflyer.AttributeMapper(handler.default_render_context)
+        for module in handler.app.modules:
+            params.update(module.get_render_context(handler))
+        params.update(handler.app.get_render_context(handler))
+        params.update(handler.render_context)
+        params.update(kwargs)
+        tmpl = self.get_template(handler, tmplname)
+        return tmpl.render(**params)
+
+        
+
 
 
 ###
