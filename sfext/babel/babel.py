@@ -348,13 +348,6 @@ class Babel(Module):
         l = self.get_locale(handler)
         return self.catalogs.get(str(l), support.Translations.load())
 
-        translations = getattr(handler, "babel_translations", None)
-        if translations is None:
-            dirname = pkg_resources.resource_filename(self.app.import_name, "translations")
-            translations = support.Translations.load(dirname, [self.get_locale(handler)])
-            handler.babel_translations = translations
-        return translations
-
 
     def get_locale(self, handler):
         """Returns the locale that should be used for this request as
