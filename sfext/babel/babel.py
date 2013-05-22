@@ -268,8 +268,8 @@ class Babel(Module):
     def get_render_context(self, handler):
         """pass in gettext and ungettext into the local namespace."""
         return dict(
-                gettext = functools.partial(gettext, self.get_translations(handler)),
-                ngettext = functools.partial(ngettext, self.get_translations(handler)),
+            gettext = functools.partial(gettext, self.get_translations(handler)),
+            ngettext = functools.partial(ngettext, self.get_translations(handler)),
         )
 
     def load_translations(self):
@@ -386,7 +386,14 @@ class Babel(Module):
         path, filename = os.path.split(tmplname)
         lpath = os.path.join(path, str(l), filename)
         dpath = os.path.join(path, str(d), filename)
-        return self.app.jinja_env.select_template([lpath, dpath], globals = handler.template_globals)
+
+        # now differ between module and non-module usage
+        if handler.module:
+            lpath = os.path.normpath(os.path.join("_m", handler.module.name, lpath))
+            dpath = os.path.normpath(os.path.join("_m", handler.module.name, dpath))
+            return self.app.jinja_env.get_or_select_template([lpath, dpath], globals = handler.template_globals)
+        else:
+            return self.app.jinja_env.get_or_select_template([lpath, dpath], globals = handler.template_globals)
         
     def render_lang(self, handler, tmplname=None, **kwargs):
         """renders a language dependant template. It will use ``get_template`` to find the

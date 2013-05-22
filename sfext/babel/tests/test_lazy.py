@@ -4,6 +4,10 @@ from starflyer import Application, Handler, URL
 
 class App(Application):
 
+    defaults = {
+        'testing' : True,
+    }
+
     modules = [
         babel_module()
     ]

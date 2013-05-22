@@ -54,6 +54,15 @@ sf-babel would then do the following when being asked for ``emails/subscription.
 3. If it is not found, it will do the same for the default locale.
 
 
+Modules
+=======
+
+This also works in modules but in modules we have more paths to consider when searching a template. We search for it in the following order:
+
+- the chosen locale in the apps module specific templates (e.g. /_m/<module_name>/<file>)
+
+
+
 
 Usage
 =====
