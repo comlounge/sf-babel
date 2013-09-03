@@ -268,6 +268,7 @@ class Babel(Module):
     def get_render_context(self, handler):
         """pass in gettext and ungettext into the local namespace."""
         return dict(
+            LANGUAGE = self.get_language_code(handler),
             gettext = functools.partial(gettext, self.get_translations(handler)),
             ngettext = functools.partial(ngettext, self.get_translations(handler)),
             LANGUAGE = str(self.get_locale(handler))
@@ -339,6 +340,10 @@ class Babel(Module):
         """
         return timezone(self.config['default_timezone'])
 
+    def get_language_code(self, handler):
+        """Returns the language code as a string"""
+        l = self.get_locale(handler)
+        return str(l)
 
     def get_translations(self, handler):
         """Returns the correct gettext translations that should be used for
