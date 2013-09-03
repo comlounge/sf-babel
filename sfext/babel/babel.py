@@ -270,6 +270,7 @@ class Babel(Module):
         return dict(
             gettext = functools.partial(gettext, self.get_translations(handler)),
             ngettext = functools.partial(ngettext, self.get_translations(handler)),
+            LANGUAGE = str(self.get_locale(handler))
         )
 
     def load_translations(self):
