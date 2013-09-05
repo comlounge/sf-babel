@@ -264,6 +264,7 @@ class Babel(Module):
         handler._ = self.get_translations(handler).ugettext
         handler.get_template_lang = functools.partial(self.get_template, handler)
         handler.render_lang = functools.partial(self.render_lang, handler)
+        handler.LANGUAGE = str(self.get_locale(handler))
 
     def get_render_context(self, handler):
         """pass in gettext and ungettext into the local namespace."""
