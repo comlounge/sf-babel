@@ -14,6 +14,8 @@ from __future__ import absolute_import
 import os
 import functools
 import starflyer
+from jinja2 import environmentfilter, Markup, escape
+
 
 # this is a workaround for a snow leopard bug that babel does not
 # work around :)
@@ -23,6 +25,7 @@ if os.environ.get('LC_CTYPE', '').lower() == 'utf-8':
 
 from datetime import datetime
 from babel import dates, numbers, support, Locale
+from babel.dates import format_date, format_datetime, format_time
 from werkzeug import ImmutableDict
 from starflyer import Module, AttributeMapper
 import pkg_resources
@@ -234,7 +237,7 @@ class Babel(Module):
         if self.config.configure_jinja:
             app.jinja_env.filters.update(
                 datetimeformat=format_datetime,
-                dateformat=format_date,
+                dateformat=functools.partial(format_date, self),
                 timeformat=format_time,
                 timedeltaformat=format_timedelta,
                 numberformat=format_number,
@@ -265,13 +268,19 @@ class Babel(Module):
         handler.get_template_lang = functools.partial(self.get_template, handler)
         handler.render_lang = functools.partial(self.render_lang, handler)
         handler.LANGUAGE = str(self.get_locale(handler))
+        handler.TIMEZONE = str(self.get_timezone(handler))
 
     def get_render_context(self, handler):
         """pass in gettext and ungettext into the local namespace."""
+        l = self.get_locale(handler)
         return dict(
             gettext = functools.partial(gettext, self.get_translations(handler)),
             ngettext = functools.partial(ngettext, self.get_translations(handler)),
-            LANGUAGE = str(self.get_locale(handler))
+            LANGUAGE = str(l),
+
+            # date functions
+            dateformat=functools.partial(format_date, l, self.get_timezone(handler)),
+
         )
 
     def load_translations(self):
@@ -345,6 +354,11 @@ class Babel(Module):
         l = self.get_locale(handler)
         return str(l)
 
+    def get_formats(self):
+        """return the date format strings for a locale"""
+        l = self.get_locale(handler)
+        return locale.date_formats
+
     def get_translations(self, handler):
         """Returns the correct gettext translations that should be used for
         this request.  This will never fail and return a dummy translation
@@ -369,6 +383,26 @@ class Babel(Module):
                 locale = Locale.parse(rv)
             handler.babel_locale = locale
         return locale
+
+    def get_timezone(self, handler):
+        """Returns the timezone that should be used for this request as
+        `pytz.timezone` object.  This returns `None` if used outside of
+        a request.
+        """
+        tzinfo = getattr(handler, 'babel_tzinfo', None)
+        if tzinfo is None:
+            rv = self.select_timezone(handler)
+            if rv is None:
+                tzinfo = self.default_timezone
+            else:
+                if isinstance(rv, basestring):
+                    tzinfo = timezone(rv)
+                else:
+                    tzinfo = rv
+            handler.babel_tzinfo = tzinfo
+        return tzinfo
+
+
 
     def gettext(self, handler, s):
         """translate the string ``s`` based on the handler"""
@@ -424,29 +458,6 @@ class Babel(Module):
 ### non thread-local
 ###
 
-def get_timezone():
-    """Returns the timezone that should be used for this request as
-    `pytz.timezone` object.  This returns `None` if used outside of
-    a request.
-    """
-    ctx = _request_ctx_stack.top
-    tzinfo = getattr(ctx, 'babel_tzinfo', None)
-    if tzinfo is None:
-        babel = ctx.app.extensions['babel']
-        if babel.timezone_selector_func is None:
-            tzinfo = babel.default_timezone
-        else:
-            rv = babel.timezone_selector_func()
-            if rv is None:
-                tzinfo = babel.default_timezone
-            else:
-                if isinstance(rv, basestring):
-                    tzinfo = timezone(rv)
-                else:
-                    tzinfo = rv
-        ctx.babel_tzinfo = tzinfo
-    return tzinfo
-
 
 def refresh():
     """Refreshes the cached timezones and locale information.  This can
@@ -467,21 +478,20 @@ def refresh():
             delattr(ctx, key)
 
 
-def _get_format(key, format):
+def _get_format(locale, key, format):
     """A small helper for the datetime formatting functions.  Looks up
     format defaults for different kinds.
-    """
-    babel = _request_ctx_stack.top.app.extensions['babel']
+    """    
     if format is None:
-        format = babel.date_formats[key]
+        format = locale.date_formats[key]
     if format in ('short', 'medium', 'full', 'long'):
-        rv = babel.date_formats['%s.%s' % (key, format)]
+        rv = locale.date_formats['%s.%s' % (key, format)]
         if rv is not None:
             format = rv
     return format
 
 
-def to_user_timezone(datetime):
+def to_user_timezone(tzinfo, datetime):
     """Convert a datetime object to the user's timezone.  This automatically
     happens on all date formatting unless rebasing is disabled.  If you need
     to convert a :class:`datetime.datetime` object at any time to the user's
@@ -489,7 +499,6 @@ def to_user_timezone(datetime):
     """
     if datetime.tzinfo is None:
         datetime = datetime.replace(tzinfo=UTC)
-    tzinfo = get_timezone()
     return tzinfo.normalize(datetime.astimezone(tzinfo))
 
 
@@ -522,7 +531,7 @@ def format_datetime(datetime=None, format=None, rebase=True):
     return _date_format(dates.format_datetime, datetime, format, rebase)
 
 
-def format_date(date=None, format=None, rebase=True):
+def format_date(locale, tzinfo, date=None, format="medium", rebase=True):
     """Return a date formatted according to the given pattern.  If no
     :class:`~datetime.datetime` or :class:`~datetime.date` object is passed,
     the current time is assumed.  By default rebasing happens which causes
@@ -534,17 +543,13 @@ def format_date(date=None, format=None, rebase=True):
     ``'long'`` or ``'full'`` (in which cause the language's default for
     that setting is used, or the default from the :attr:`Babel.date_formats`
     mapping is used) or a format string as documented by Babel.
-
-    This function is also available in the template context as filter
-    named `dateformat`.
     """
+
     if rebase and isinstance(date, datetime):
-        date = to_user_timezone(date)
-    format = _get_format('date', format)
-    return _date_format(dates.format_date, date, format, rebase)
+        date = to_user_timezone(tzinfo, date)
+    return dates.format_date(date, format=format, locale=str(locale))
 
-
-def format_time(time=None, format=None, rebase=True):
+def format_time(locale, tzinfo, time=None, format=None, rebase=True):
     """Return a time formatted according to the given pattern.  If no
     :class:`~datetime.datetime` object is passed, the current time is
     assumed.  By default rebasing happens which causes the object to
@@ -557,11 +562,10 @@ def format_time(time=None, format=None, rebase=True):
     that setting is used, or the default from the :attr:`Babel.date_formats`
     mapping is used) or a format string as documented by Babel.
 
-    This function is also available in the template context as filter
-    named `timeformat`.
     """
+    return dates.format_time(time, format)
     format = _get_format('time', format)
-    return _date_format(dates.format_time, time, format, rebase)
+    #return _date_format(dates.format_time, time, format, rebase)
 
 
 def format_timedelta(datetime_or_timedelta, granularity='second'):
@@ -578,12 +582,11 @@ def format_timedelta(datetime_or_timedelta, granularity='second'):
                                   locale=get_locale())
 
 
-def _date_format(formatter, obj, format, rebase, **extra):
+def _date_format(tzinfo, locale, formatter, obj, format, rebase, **extra):
     """Internal helper that formats the date."""
-    locale = get_locale()
     extra = {}
     if formatter is not dates.format_date and rebase:
-        extra['tzinfo'] = get_timezone()
+        extra['tzinfo'] = tzinfo
     return formatter(obj, format, locale=locale, **extra)
 
 
