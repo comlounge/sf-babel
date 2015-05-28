@@ -330,7 +330,7 @@ class Babel(Module):
 
                 # load all domains
                 for f in os.listdir(locale_dir):
-                    if f.endswith(".po"):
+                    if f.endswith(".mo"):
                         domain = os.path.splitext(f)[0]
                         trans = support.Translations.load(dirname, l, domain = domain)
                         if str(l) not in self.catalogs:
