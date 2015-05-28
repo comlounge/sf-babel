@@ -327,12 +327,17 @@ class Babel(Module):
             if filter(lambda x: x.endswith('.mo'), os.listdir(locale_dir)):
                 l = Locale.parse(folder)
                 self.all_locales.add(str(l))
-                trans = support.Translations.load(dirname, l)
-                if str(l) not in self.catalogs:
-                    self.catalogs[str(l)] = trans
-                else:
-                    # we merge if it exists already
-                    self.catalogs[str(l)].merge(trans)
+
+                # load all domains
+                for f in os.listdir(locale_dir):
+                    if f.endswith(".po"):
+                        domain = os.path.splitext(f)[0]
+                        trans = support.Translations.load(dirname, l, domain = domain)
+                        if str(l) not in self.catalogs:
+                            self.catalogs[str(l)] = trans
+                        else:
+                            # we merge if it exists already
+                            self.catalogs[str(l)].merge(trans)
 
 
     @property
