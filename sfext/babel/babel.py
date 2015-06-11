@@ -277,6 +277,7 @@ class Babel(Module):
             gettext = functools.partial(gettext, self.get_translations(handler)),
             ngettext = functools.partial(ngettext, self.get_translations(handler)),
             LANGUAGE = str(l),
+            locale = str(handler.babel_locale),
 
             # date functions
             dateformat=functools.partial(format_date, l, self.get_timezone(handler)),
