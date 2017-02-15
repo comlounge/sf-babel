@@ -435,8 +435,10 @@ class Babel(Module):
 
         # now differ between module and non-module usage
         if handler.module:
-            lpath = os.path.normpath(os.path.join("_m", handler.module.name, lpath))
-            dpath = os.path.normpath(os.path.join("_m", handler.module.name, dpath))
+            if not lpath.startswith("_m"):
+                lpath = os.path.normpath(os.path.join("_m", handler.module.name, lpath))
+            if not dpath.startswith("_m"):
+                dpath = os.path.normpath(os.path.join("_m", handler.module.name, dpath))
             return self.app.jinja_env.get_or_select_template([lpath, dpath], globals = handler.template_globals)
         else:
             return self.app.jinja_env.get_or_select_template([lpath, dpath], globals = handler.template_globals)
